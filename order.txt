@@ -1,0 +1,4 @@
+gunicorn -c conf/gunicorn1.py server1:app
+gunicorn -c conf/gunicorn2.py server2:app
+gunicorn -c conf/gunicorn3.py server3:app
+gunicorn -c conf/gunicorn4.py server4:app

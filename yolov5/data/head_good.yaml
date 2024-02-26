@@ -1,0 +1,8 @@
+path: /home/disk60t/qgy/Face_Data/VOCdevkit/VOC2007/
+train: /home/disk60t/qgy/Face_Data/VOCdevkit/VOC2007/train.txt
+val: /home/disk60t/qgy/Face_Data/VOCdevkit/VOC2007/val.txt
+test: /home/disk60t/qgy/Face_Data/VOCdevkit/VOC2007/test.txt
+
+# Classes
+nc: 2 # number of classes
+names: [ 'goods','head' ]  # class names
