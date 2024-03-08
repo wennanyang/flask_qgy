@@ -6,7 +6,7 @@ from wsgiref.simple_server import WSGIRequestHandler
 import torch
 from flask import Flask,jsonify,request
 import cv2
-from SupContrast.networks.resnet_big import SupConResNet
+
 import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
 import pathlib
@@ -18,6 +18,8 @@ import requests
 import json
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm 
+from arcface.nets.arcface import Arcface
+from arcface.utils.utils import get_num_classes
 app=Flask(__name__)
 executor=ThreadPoolExecutor(5)
 #CUDA
@@ -34,29 +36,34 @@ def detect_gpu():
             continue
     return -1
 
-def load_yolov5_and_resnet_model(gpu_index, yolo_model_path, resnet_model_path):
+def load_yolov5_and_arcface_model(gpu_index, yolo_model_path, arcface_model_path):
     device = torch.device("cuda", gpu_index)
+
     model_yolov5 = torch.hub.load('./yolov5',"custom",path=yolo_model_path,source='local')
     model_yolov5 = model_yolov5.to(device=device)
     model_yolov5.eval()
 
-    model_resnet=SupConResNet(name="resnet18")
-    ckpt=torch.load(resnet_model_path, map_location='cpu')
-    state_dict = ckpt['model']
-    if torch.cuda.is_available():
-        if torch.cuda.device_count() > 1:
-            model_resnet.encoder = torch.nn.DataParallel(model_resnet.encoder)
-        else:
-            new_state_dict = {}
-            for k, v in state_dict.items():
-                k = k.replace("module.", "")
-                new_state_dict[k] = v
-            state_dict = new_state_dict
-    model_resnet = model_resnet.to(device=device)
+    annotation_path = "arcface/r553.txt"
+    num_classes = get_num_classes(annotation_path=annotation_path)
+    backbone = "resnet18"
+    pretrained = False
+    arcface_model = Arcface(num_classes=num_classes, backbone=backbone, pretrained=pretrained)
+    ckpt=torch.load(arcface_model_path, map_location='cpu')
+    # state_dict = ckpt['model']
+    # if torch.cuda.is_available():
+    #     if torch.cuda.device_count() > 1:
+    #         arcface_model.encoder = torch.nn.DataParallel(arcface_model.encoder)
+    #     else:
+    #         new_state_dict = {}
+    #         for k, v in state_dict.items():
+    #             k = k.replace("module.", "")
+    #             new_state_dict[k] = v
+    #         state_dict = new_state_dict
+    arcface_model = arcface_model.to(device=device)
     cudnn.benchmark = True
-    model_resnet.load_state_dict(state_dict=state_dict)
-    model_resnet.eval()
-    return model_yolov5, model_resnet
+    arcface_model.load_state_dict(state_dict=ckpt)
+    arcface_model.eval()
+    return model_yolov5, arcface_model
 
 
 
@@ -138,66 +145,79 @@ def predict(arg1,arg2):
             goods=[]
             frame_number+=1
             with torch.no_grad():
-                if gpu_detect == 0:
-                    results=model_yolov5_0(img,size=640)
+                if gpu_detect != -1:
+                    model_yolov5, model_arcface = yolov5_arcface_list[gpu_detect]
+                    results=model_yolov5(img,size=640)
                     if results.xyxy[0].size()[0]!=0:
                         for i in range(results.xyxy[0].size()[0]):
                             if results.xyxy[0][i][5]==0:
                                 goods.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
                                 crop_img=img1[int(results.xyxy[0][i][1]):int(results.xyxy[0][i][3]),int(results.xyxy[0][i][0]):int(results.xyxy[0][i][2])]
                                 crop_img1=transform_image(crop_img).unsqueeze(0).to(torch.device("cuda", gpu_detect))
-                                outputs.append(model_resnet_0(crop_img1).cpu())
+                                outputs.append(model_arcface(crop_img1).cpu())
                             elif results.xyxy[0][i][5]==1:
                                 head.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
                         frame_info[str(frame_number)]={"goods":goods,"head":head}
-                elif gpu_detect == 1:
-                    results=model_yolov5_1(img,size=640)
-                    if results.xyxy[0].size()[0]!=0:
-                        for i in range(results.xyxy[0].size()[0]):
-                            if results.xyxy[0][i][5]==0:
-                                goods.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
-                                crop_img=img1[int(results.xyxy[0][i][1]):int(results.xyxy[0][i][3]),int(results.xyxy[0][i][0]):int(results.xyxy[0][i][2])]
-                                crop_img1=transform_image(crop_img).unsqueeze(0).to(torch.device("cuda", gpu_detect))
-                                outputs.append(model_resnet_1(crop_img1).cpu())
-                            elif results.xyxy[0][i][5]==1:
-                                head.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
-                        frame_info[str(frame_number)]={"goods":goods,"head":head}
-                elif gpu_detect == 2:
-                    results=model_yolov5_2(img,size=640)
-                    if results.xyxy[0].size()[0]!=0:
-                        for i in range(results.xyxy[0].size()[0]):
-                            if results.xyxy[0][i][5]==0:
-                                goods.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
-                                crop_img=img1[int(results.xyxy[0][i][1]):int(results.xyxy[0][i][3]),int(results.xyxy[0][i][0]):int(results.xyxy[0][i][2])]
-                                crop_img1=transform_image(crop_img).unsqueeze(0).to(torch.device("cuda", gpu_detect))
-                                outputs.append(model_resnet_2(crop_img1).cpu())
-                            elif results.xyxy[0][i][5]==1:
-                                head.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
-                        frame_info[str(frame_number)]={"goods":goods,"head":head}
-                elif gpu_detect == 3:
-                    results=model_yolov5_3(img,size=640)
-                    if results.xyxy[0].size()[0]!=0:
-                        for i in range(results.xyxy[0].size()[0]):
-                            if results.xyxy[0][i][5]==0:
-                                goods.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
-                                crop_img=img1[int(results.xyxy[0][i][1]):int(results.xyxy[0][i][3]),int(results.xyxy[0][i][0]):int(results.xyxy[0][i][2])]
-                                crop_img1=transform_image(crop_img).unsqueeze(0).to(torch.device("cuda", gpu_detect))
-                                outputs.append(model_resnet_3(crop_img1).cpu())
-                            elif results.xyxy[0][i][5]==1:
-                                head.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])  
-                        frame_info[str(frame_number)]={"goods":goods,"head":head}
-                elif gpu_detect == 4:
-                    results=model_yolov5_4(img,size=640)
-                    if results.xyxy[0].size()[0]!=0:
-                        for i in range(results.xyxy[0].size()[0]):
-                            if results.xyxy[0][i][5]==0:
-                                goods.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
-                                crop_img=img1[int(results.xyxy[0][i][1]):int(results.xyxy[0][i][3]),int(results.xyxy[0][i][0]):int(results.xyxy[0][i][2])]
-                                crop_img1=transform_image(crop_img).unsqueeze(0).to(torch.device("cuda", gpu_detect))
-                                outputs.append(model_resnet_4(crop_img1).cpu())
-                            elif results.xyxy[0][i][5]==1:
-                                head.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])  
-                        frame_info[str(frame_number)]={"goods":goods,"head":head}
+                # if gpu_detect == 0:
+                #     results=model_yolov5_0(img,size=640)
+                #     if results.xyxy[0].size()[0]!=0:
+                #         for i in range(results.xyxy[0].size()[0]):
+                #             if results.xyxy[0][i][5]==0:
+                #                 goods.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
+                #                 crop_img=img1[int(results.xyxy[0][i][1]):int(results.xyxy[0][i][3]),int(results.xyxy[0][i][0]):int(results.xyxy[0][i][2])]
+                #                 crop_img1=transform_image(crop_img).unsqueeze(0).to(torch.device("cuda", gpu_detect))
+                #                 outputs.append(model_arcface_0(crop_img1).cpu())
+                #             elif results.xyxy[0][i][5]==1:
+                #                 head.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
+                #         frame_info[str(frame_number)]={"goods":goods,"head":head}
+                # elif gpu_detect == 1:
+                #     results=model_yolov5_1(img,size=640)
+                #     if results.xyxy[0].size()[0]!=0:
+                #         for i in range(results.xyxy[0].size()[0]):
+                #             if results.xyxy[0][i][5]==0:
+                #                 goods.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
+                #                 crop_img=img1[int(results.xyxy[0][i][1]):int(results.xyxy[0][i][3]),int(results.xyxy[0][i][0]):int(results.xyxy[0][i][2])]
+                #                 crop_img1=transform_image(crop_img).unsqueeze(0).to(torch.device("cuda", gpu_detect))
+                #                 outputs.append(model_arcface_1(crop_img1).cpu())
+                #             elif results.xyxy[0][i][5]==1:
+                #                 head.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
+                #         frame_info[str(frame_number)]={"goods":goods,"head":head}
+                # elif gpu_detect == 2:
+                #     results=model_yolov5_2(img,size=640)
+                #     if results.xyxy[0].size()[0]!=0:
+                #         for i in range(results.xyxy[0].size()[0]):
+                #             if results.xyxy[0][i][5]==0:
+                #                 goods.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
+                #                 crop_img=img1[int(results.xyxy[0][i][1]):int(results.xyxy[0][i][3]),int(results.xyxy[0][i][0]):int(results.xyxy[0][i][2])]
+                #                 crop_img1=transform_image(crop_img).unsqueeze(0).to(torch.device("cuda", gpu_detect))
+                #                 outputs.append(model_arcface_2(crop_img1).cpu())
+                #             elif results.xyxy[0][i][5]==1:
+                #                 head.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
+                #         frame_info[str(frame_number)]={"goods":goods,"head":head}
+                # elif gpu_detect == 3:
+                #     results=model_yolov5_3(img,size=640)
+                #     if results.xyxy[0].size()[0]!=0:
+                #         for i in range(results.xyxy[0].size()[0]):
+                #             if results.xyxy[0][i][5]==0:
+                #                 goods.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
+                #                 crop_img=img1[int(results.xyxy[0][i][1]):int(results.xyxy[0][i][3]),int(results.xyxy[0][i][0]):int(results.xyxy[0][i][2])]
+                #                 crop_img1=transform_image(crop_img).unsqueeze(0).to(torch.device("cuda", gpu_detect))
+                #                 outputs.append(model_arcface_3(crop_img1).cpu())
+                #             elif results.xyxy[0][i][5]==1:
+                #                 head.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])  
+                #         frame_info[str(frame_number)]={"goods":goods,"head":head}
+                # elif gpu_detect == 4:
+                #     results=model_yolov5_4(img,size=640)
+                #     if results.xyxy[0].size()[0]!=0:
+                #         for i in range(results.xyxy[0].size()[0]):
+                #             if results.xyxy[0][i][5]==0:
+                #                 goods.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])
+                #                 crop_img=img1[int(results.xyxy[0][i][1]):int(results.xyxy[0][i][3]),int(results.xyxy[0][i][0]):int(results.xyxy[0][i][2])]
+                #                 crop_img1=transform_image(crop_img).unsqueeze(0).to(torch.device("cuda", gpu_detect))
+                #                 outputs.append(model_arcface_4(crop_img1).cpu())
+                #             elif results.xyxy[0][i][5]==1:
+                #                 head.append([int(results.xyxy[0][i][0]),int(results.xyxy[0][i][1]),int(results.xyxy[0][i][2]),int(results.xyxy[0][i][3])])  
+                #         frame_info[str(frame_number)]={"goods":goods,"head":head}
                 else:
                     logging.error("no useful gpu")
                 
@@ -225,13 +245,15 @@ def predict(arg1,arg2):
 
 if __name__=="__main__":
     yolov5_weight_path = "./models/best.pt"
-    resnet_weight_path = "./models/ckpt_epoch_1000.pth"
-    model_yolov5_0, model_resnet_0 = load_yolov5_and_resnet_model(0, yolov5_weight_path, resnet_weight_path)
-    model_yolov5_1, model_resnet_1 = load_yolov5_and_resnet_model(1, yolov5_weight_path, resnet_weight_path)
-    model_yolov5_2, model_resnet_2 = load_yolov5_and_resnet_model(2, yolov5_weight_path, resnet_weight_path)
-    model_yolov5_3, model_resnet_3 = load_yolov5_and_resnet_model(3, yolov5_weight_path, resnet_weight_path)
-    model_yolov5_4, model_resnet_4 = load_yolov5_and_resnet_model(4, yolov5_weight_path, resnet_weight_path)
-    logging.info("__________________load the yolov5 and resnet successfully_____________")
+    arcface_weight_path = "./models/arcface.pth"
+    model_yolov5_0, model_arcface_0 = load_yolov5_and_arcface_model(0, yolov5_weight_path, arcface_weight_path)
+    model_yolov5_1, model_arcface_1 = load_yolov5_and_arcface_model(1, yolov5_weight_path, arcface_weight_path)
+    model_yolov5_2, model_arcface_2 = load_yolov5_and_arcface_model(2, yolov5_weight_path, arcface_weight_path)
+    model_yolov5_3, model_arcface_3 = load_yolov5_and_arcface_model(3, yolov5_weight_path, arcface_weight_path)
+    model_yolov5_4, model_arcface_4 = load_yolov5_and_arcface_model(4, yolov5_weight_path, arcface_weight_path)
+    yolov5_arcface_list = [[model_yolov5_0, model_arcface_0],[model_yolov5_1, model_arcface_1],[model_yolov5_2, model_arcface_2],
+                  [model_yolov5_3, model_arcface_3],[model_yolov5_4, model_arcface_4]]
+    logging.info("__________________load the yolov5 and arcface successfully____________")
 
     template=load_template("./template")
     logging.info("__________________load the template successfully______________________")

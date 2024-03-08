@@ -4,12 +4,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import Module, Parameter
-from nets.iresnet import iresnet18
-from nets.resnet import resnet18
-from nets.mobilefacenet import get_mbf
-from nets.mobilenet import get_mobilenet
-from nets.vit_face import vit
-from nets.dilate3 import Dilateformer3 as dilate
+from arcface.nets.iresnet import iresnet18
+from arcface.nets.resnet import resnet18
+from arcface.nets.mobilefacenet import get_mbf
+from arcface.nets.mobilenet import get_mobilenet
+from arcface.nets.vit_face import vit
+from arcface.nets.dilate3 import Dilateformer3 as dilate
 import numpy as np
 class Arcface_Head(Module):
     def __init__(self, embedding_size=128, num_classes=553, s=64., m=0.5):
