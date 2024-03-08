@@ -255,7 +255,7 @@ if __name__=="__main__":
                   [model_yolov5_3, model_arcface_3],[model_yolov5_4, model_arcface_4]]
     logging.info("__________________load the yolov5 and arcface successfully____________")
 
-    template=load_template("./template")
+    template=load_template("./arcface/csv")
     logging.info("__________________load the template successfully______________________")
 
     app.run(host="0.0.0.0",debug=True,port=5001)
