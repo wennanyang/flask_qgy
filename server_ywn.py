@@ -6,7 +6,6 @@ from wsgiref.simple_server import WSGIRequestHandler
 import torch
 from flask import Flask,jsonify,request
 import cv2
-from SupContrast.networks.resnet_big import SupConResNet
 import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
 import pathlib
